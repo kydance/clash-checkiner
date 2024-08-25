@@ -1,0 +1,13 @@
+# Cookie
+*.txt
+
+# executables
+checkiner
+
+.vscode
+
+conf/*
+!conf/example
+
+# log
+*.log
