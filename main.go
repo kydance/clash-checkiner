@@ -1,6 +1,8 @@
 package main
 
 import (
+	"Checkiner/pkg/checkin"
+	"Checkiner/pkg/util"
 	"flag"
 	"fmt"
 	"log"
@@ -10,12 +12,31 @@ import (
 	"time"
 )
 
+var (
+	//>>>> flags
+	h bool
+	// THY
+	web string
+	// /home/username/...
+	path string
+	// web : path
+	webs map[string]string
+
+	// time interval
+	INTEVAL  time.Duration = time.Minute
+	interval float64
+
+	// The log file path
+	LOG_FILE string = "./checkiner.log"
+	// flags <<<<
+)
+
 // setWebMap sets website and cookie path
 // map: webMap[website]cookie_path
 func setWebMap(web string, path string) map[string]string {
 	webMap := make(map[string]string)
-	webs := strings.Split(web, kDELEMITER)
-	paths := strings.Split(path, kDELEMITER)
+	webs := strings.Split(web, util.DELEMITER)
+	paths := strings.Split(path, util.DELEMITER)
 
 	for idx, w := range webs {
 		webMap[w] = paths[idx]
@@ -25,17 +46,22 @@ func setWebMap(web string, path string) map[string]string {
 }
 
 func checkinRun(webs map[string]string) (string, error) {
-	checkers := make([]*Checkin, 0)
+	checkers := make([]*checkin.Checkin, 0)
 
 	for webName, webCfg := range webs {
 		// NewCheckiner()
 		fmt.Println(webName, webCfg)
 		if webName[0] == 'T' {
-			THY_checker := NewCheckiner(webName, LOGIN_HEADER_ACCEPT, LOGIN_HEADER_CONTENT_TYPE, LOGIN_HEADER_METHOD, kTHY_URL_LOGIN, CHECKIN_HEADER_METHOD, kTHY_URL_CHECKIN, webs[webName])
-
+			THY_checker := checkin.NewCheckiner(webName,
+				util.LOGIN_HEADER_ACCEPT, util.LOGIN_HEADER_CONTENT_TYPE,
+				util.LOGIN_HEADER_METHOD, util.THY_URL_LOGIN,
+				util.CHECKIN_HEADER_METHOD, util.THY_URL_CHECKIN, webs[webName])
 			checkers = append(checkers, THY_checker)
 		} else {
-			CUTECLOUD_checker := NewCheckiner(webName, kCUTECLOUD_LOGIN_HEADER_ACCEPT, LOGIN_HEADER_CONTENT_TYPE, LOGIN_HEADER_METHOD, kCUTECLOUD_URL_LOGIN, CHECKIN_HEADER_METHOD, kCUTECLOUD_URL_CHECKIN, webs[webName])
+			CUTECLOUD_checker := checkin.NewCheckiner(webName,
+				util.CUTECLOUD_LOGIN_HEADER_ACCEPT, util.LOGIN_HEADER_CONTENT_TYPE,
+				util.LOGIN_HEADER_METHOD, util.CUTECLOUD_URL_LOGIN,
+				util.CHECKIN_HEADER_METHOD, util.CUTECLOUD_URL_CHECKIN, webs[webName])
 
 			checkers = append(checkers, CUTECLOUD_checker)
 		}
@@ -47,7 +73,7 @@ func checkinRun(webs map[string]string) (string, error) {
 	// Timer
 	go func(ch chan<- struct{}) {
 		// Create timer
-		timer := time.NewTicker(kINTEVAL)
+		timer := time.NewTicker(INTEVAL)
 		defer func() {
 			timer.Stop()
 			close(ch)
@@ -72,7 +98,7 @@ func checkinRun(webs map[string]string) (string, error) {
 
 			for _, checker := range checkers {
 				fmt.Printf("curr day: %v %v", curr_day, checker)
-				go func(checker *Checkin) {
+				go func(checker *checkin.Checkin) {
 					defer wg.Done()
 
 					if checker.LastDay != curr_day {
@@ -85,12 +111,14 @@ func checkinRun(webs map[string]string) (string, error) {
 						if _, ok := webs[checker.Whoami]; ok {
 							var err error = nil
 							if checker.Whoami[0] == 'T' {
-								err = checker.Checkin(CHECKIN_HEADER_ACCEPT, HEADER_CONTENT_LENGTH, kTHY_URL_ORIGIN)
+								err = checker.Checkin(util.CHECKIN_HEADER_ACCEPT,
+									util.HEADER_CONTENT_LENGTH, util.THY_URL_ORIGIN)
 							} else {
-								err = checker.Checkin(CHECKIN_HEADER_ACCEPT, HEADER_CONTENT_LENGTH, kCUTECLOUD_URL_ORIGIN)
+								err = checker.Checkin(util.CHECKIN_HEADER_ACCEPT,
+									util.HEADER_CONTENT_LENGTH, util.CUTECLOUD_URL_ORIGIN)
 							}
 							if err != nil {
-								notifySend("Checkiner", "critical", checker.Whoami+" Check in Failed: "+err.Error())
+								util.NotifySend("Checkiner", "critical", checker.Whoami+" Check in Failed: "+err.Error())
 								return
 							}
 							checker.Flag_checkined = true
@@ -114,11 +142,13 @@ func checkinRun(webs map[string]string) (string, error) {
 func init() {
 	flag.BoolVar(&h, "h", false, "help")
 
-	flag.StringVar(&web, "w", `THY@THY1@CUTECLOUD`, "set target webs ("+kDELEMITER+" is split char) support: [THY, CUTECLOUD]")
-	flag.StringVar(&path, "p", "/home/tianen/go/src/Checkiner/config/THY@/home/tianen/go/src/Checkiner/config/THY0@/home/tianen/go/src/Checkiner/config/CUTECLOUD",
-		"set target webs cookie ("+kDELEMITER+" is split char) support: [THY, CUTECLOUD]")
+	flag.StringVar(&web, "w", `THY@THY1@CUTECLOUD`, "set target webs ("+
+		util.DELEMITER+" is split char) support: [THY, CUTECLOUD]")
+	flag.StringVar(&path, "p",
+		"/home/tianen/go/src/Checkiner/config/THY@/home/tianen/go/src/Checkiner/config/THY0@/home/tianen/go/src/Checkiner/config/CUTECLOUD",
+		"set target webs cookie ("+util.DELEMITER+" is split char) support: [THY, CUTECLOUD]")
 	flag.Float64Var(&interval, "i", 10, "set checkin interval (minute)")
-	flag.StringVar(&kLOG_FILE, "l", "./checkiner.log", "set log file path")
+	flag.StringVar(&LOG_FILE, "l", "./checkiner.log", "set log file path")
 
 	flag.Usage = usage
 }
@@ -126,7 +156,7 @@ func init() {
 func main() {
 	flag.Parse()
 	webs = setWebMap(web, path)
-	kINTEVAL = time.Duration(float64(time.Minute) * interval)
+	INTEVAL = time.Duration(float64(time.Minute) * interval)
 
 	if h || web == "" || path == "" || interval <= 0 {
 		flag.Usage()
@@ -134,7 +164,7 @@ func main() {
 	}
 
 	// Logger
-	log_file, err := os.OpenFile(kLOG_FILE, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	log_file, err := os.OpenFile(LOG_FILE, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		fmt.Println("Open log file error: ", err)
 		return
@@ -145,14 +175,14 @@ func main() {
 	log.SetOutput(log_file)
 
 	// Welcome
-	notifySend("Checkiner", "normal", "Welcome to enjoy your time with Checkiner")
+	util.NotifySend("Checkiner", "normal", "Welcome to enjoy your time with Checkiner")
 
 	// It's time to checkin
 	for {
 		who, err := checkinRun(webs)
 		// Checkiner failed
 		if err != nil {
-			notifySend("Checkiner", "critical", who+" Check in Failed: "+err.Error())
+			util.NotifySend("Checkiner", "critical", who+" Check in Failed: "+err.Error())
 		}
 	}
 }

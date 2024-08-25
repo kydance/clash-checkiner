@@ -1,6 +1,7 @@
-package main
+package checkin
 
 import (
+	"Checkiner/pkg/util"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
@@ -36,7 +37,7 @@ type Checkin struct {
 }
 
 func NewCheckiner(whoami string, login_header_accpet string, login_header_content_type string, login_header_method string, login_url string, checkin_header_method string, checkin_url string, config_file_path string) *Checkin {
-	email, passwd, err := readConfigFromFile(config_file_path)
+	email, passwd, err := util.ReadConfigFromFile(config_file_path)
 	if err != nil {
 		// fmt.Println("Read config file error: ", err)
 		log.Fatal("Read config file error: ", err)
@@ -67,11 +68,11 @@ func (c *Checkin) setRequestHeader(req *http.Request) {
 		"Accept":             c.Login_header_accpet,
 		"Content-Type":       c.Login_header_content_type,
 		"Referer":            c.Login_url,
-		"Sec-Ch-Ua":          kHEADERS["Sec-Ch-Ua"],
-		"Sec-Ch-Ua-Mobile":   kHEADERS["Sec-Ch-Ua-Mobile"],
-		"Sec-Ch-Ua-Platform": kHEADERS["Sec-Ch-Ua-Platform"],
-		"User-Agent":         kHEADERS["User-Agent"],
-		"X-Requested-With":   kHEADERS["X-Requested-With"],
+		"Sec-Ch-Ua":          util.HEADERS["Sec-Ch-Ua"],
+		"Sec-Ch-Ua-Mobile":   util.HEADERS["Sec-Ch-Ua-Mobile"],
+		"Sec-Ch-Ua-Platform": util.HEADERS["Sec-Ch-Ua-Platform"],
+		"User-Agent":         util.HEADERS["User-Agent"],
+		"X-Requested-With":   util.HEADERS["X-Requested-With"],
 	}
 	// Add header
 	for key, value := range header {
@@ -105,10 +106,10 @@ func (c *Checkin) handleLoginResponse(resp *http.Response, cookie *string) error
 			fmt.Println(k, ":", v.(float64))
 		} else if k == "msg" {
 			// fmt.Println(k, ":", v.(string))
-			notifySend("Checkiner", "normal", ">>> "+c.Whoami+" "+v.(string))
+			util.NotifySend("Checkiner", "normal", ">>> "+c.Whoami+" "+v.(string))
 		} else {
 			// fmt.Println("Unknown key: ", k)
-			notifySend("Checkiner", "critical", "Unknown key: "+k)
+			util.NotifySend("Checkiner", "critical", "Unknown key: "+k)
 		}
 	}
 
@@ -150,7 +151,7 @@ func (c *Checkin) handleResponse(reader io.Reader) error {
 		}
 	*/
 	// TAG Level uses `critical` is to ensure checkin successfully for human.
-	notifySend("Checkiner", "critical", ">>> "+c.Whoami+" checkin success: "+dat["msg"].(string))
+	util.NotifySend("Checkiner", "critical", ">>> "+c.Whoami+" checkin success: "+dat["msg"].(string))
 	return nil
 }
 
@@ -194,20 +195,20 @@ func (c *Checkin) Checkin(header_accpet string, header_content_length string, ur
 
 	header := map[string]string{
 		"Accept":             header_accpet,
-		"Accept-Encoding":    kHEADERS["Accept-Encoding"],
-		"Accept-Language":    kHEADERS["Accept-Language"],
+		"Accept-Encoding":    util.HEADERS["Accept-Encoding"],
+		"Accept-Language":    util.HEADERS["Accept-Language"],
 		"Content-Length":     header_content_length,
 		"Cookie":             cookie,
 		"Origin":             url_orign,
 		"Referer":            c.Checkin_url,
-		"Sec-Ch-Ua":          kHEADERS["Sec-Ch-Ua"],
-		"Sec-Ch-Ua-Mobile":   kHEADERS["Sec-Ch-Ua-Mobile"],
-		"Sec-Ch-Ua-Platform": kHEADERS["Sec-Ch-Ua-Platform"],
-		"Sec-Fetch-Dest":     kHEADERS["Sec-Fetch-Dest"],
-		"Sec-Fetch-Mode":     kHEADERS["Sec-Fetch-Mode"],
-		"Sec-Fetch-Site":     kHEADERS["Sec-Fetch-Site"],
-		"User-Agent":         kHEADERS["User-Agent"],
-		"X-Requested-With":   kHEADERS["X-Requested-With"],
+		"Sec-Ch-Ua":          util.HEADERS["Sec-Ch-Ua"],
+		"Sec-Ch-Ua-Mobile":   util.HEADERS["Sec-Ch-Ua-Mobile"],
+		"Sec-Ch-Ua-Platform": util.HEADERS["Sec-Ch-Ua-Platform"],
+		"Sec-Fetch-Dest":     util.HEADERS["Sec-Fetch-Dest"],
+		"Sec-Fetch-Mode":     util.HEADERS["Sec-Fetch-Mode"],
+		"Sec-Fetch-Site":     util.HEADERS["Sec-Fetch-Site"],
+		"User-Agent":         util.HEADERS["User-Agent"],
+		"X-Requested-With":   util.HEADERS["X-Requested-With"],
 	}
 
 	// Create HTTP request
