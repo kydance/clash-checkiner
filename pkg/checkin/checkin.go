@@ -1,7 +1,6 @@
 package checkin
 
 import (
-	"Checkiner/pkg/util"
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
@@ -14,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/andybalholm/brotli"
+
+	"Checkiner/pkg/util"
 )
 
 type Checkin struct {
@@ -36,7 +37,10 @@ type Checkin struct {
 	passwd string
 }
 
-func NewCheckiner(whoami string, login_header_accpet string, login_header_content_type string, login_header_method string, login_url string, checkin_header_method string, checkin_url string, config_file_path string) *Checkin {
+func NewCheckiner(whoami, login_header_accpet, login_header_content_type,
+	login_header_method, login_url, checkin_header_method, checkin_url,
+	config_file_path string,
+) *Checkin {
 	email, passwd, err := util.ReadConfigFromFile(config_file_path)
 	if err != nil {
 		// fmt.Println("Read config file error: ", err)
@@ -100,7 +104,11 @@ func (c *Checkin) handleLoginResponse(resp *http.Response, cookie *string) error
 
 	// fmt.Println(string(buffer))
 	buf := map[string]any{}
-	json.Unmarshal(buffer, &buf)
+	err = json.Unmarshal(buffer, &buf)
+	if err != nil {
+		return err
+	}
+
 	for k, v := range buf {
 		if k == "ret" {
 			fmt.Println(k, ":", v.(float64))
@@ -151,7 +159,11 @@ func (c *Checkin) handleResponse(reader io.Reader) error {
 		}
 	*/
 	// TAG Level uses `critical` is to ensure checkin successfully for human.
-	util.NotifySend("Checkiner", "critical", ">>> "+c.Whoami+" checkin success: "+dat["msg"].(string))
+	util.NotifySend(
+		"Checkiner",
+		"critical",
+		">>> "+c.Whoami+" checkin success: "+dat["msg"].(string),
+	)
 	return nil
 }
 
@@ -185,7 +197,11 @@ func (c *Checkin) login() (string, error) {
 	return cookie, nil
 }
 
-func (c *Checkin) Checkin(header_accpet string, header_content_length string, url_orign string) error {
+func (c *Checkin) Checkin(
+	header_accpet string,
+	header_content_length string,
+	url_orign string,
+) error {
 	cookie, err := c.login()
 	if err != nil {
 		// fmt.Println(">>> "+this.Whoami+" Login error: ", err)

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"Checkiner/pkg/checkin"
-	"Checkiner/pkg/util"
 	"flag"
 	"fmt"
 	"log"
@@ -10,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"Checkiner/pkg/checkin"
+	"Checkiner/pkg/util"
 )
 
 var (
@@ -107,7 +108,12 @@ func checkinRun(webs map[string]string) (string, error) {
 						}
 
 						// thy
-						log.Printf("%s last_day: %d, curr_day: %d\n", checker.Whoami, checker.LastDay, curr_day)
+						log.Printf(
+							"%s last_day: %d, curr_day: %d\n",
+							checker.Whoami,
+							checker.LastDay,
+							curr_day,
+						)
 						if _, ok := webs[checker.Whoami]; ok {
 							var err error = nil
 							if checker.Whoami[0] == 'T' {
@@ -118,7 +124,11 @@ func checkinRun(webs map[string]string) (string, error) {
 									util.HEADER_CONTENT_LENGTH, util.CUTECLOUD_URL_ORIGIN)
 							}
 							if err != nil {
-								util.NotifySend("Checkiner", "critical", checker.Whoami+" Check in Failed: "+err.Error())
+								util.NotifySend(
+									"Checkiner",
+									"critical",
+									checker.Whoami+" Check in Failed: "+err.Error(),
+								)
 								return
 							}
 							checker.Flag_checkined = true
@@ -145,7 +155,9 @@ func init() {
 	flag.StringVar(&web, "w", `THY@THY1@CUTECLOUD`, "set target webs ("+
 		util.DELEMITER+" is split char) support: [THY, CUTECLOUD]")
 	flag.StringVar(&path, "p",
-		"/home/tianen/go/src/Checkiner/config/THY@/home/tianen/go/src/Checkiner/config/THY0@/home/tianen/go/src/Checkiner/config/CUTECLOUD",
+		`/home/tianen/go/src/Checkiner/config/THY
+@/home/tianen/go/src/Checkiner/config/THY0@
+/home/tianen/go/src/Checkiner/config/CUTECLOUD`,
 		"set target webs cookie ("+util.DELEMITER+" is split char) support: [THY, CUTECLOUD]")
 	flag.Float64Var(&interval, "i", 10, "set checkin interval (minute)")
 	flag.StringVar(&LOG_FILE, "l", "./checkiner.log", "set log file path")
@@ -191,7 +203,8 @@ func usage() {
 	log.Printf(`Checkiner version: checkiner/1.3.0
 Usage: checkiner [-h] [-w web]
 
-Example: checkiner -i 120 -w THY@CUTECLOUD -p /home/tianen/go/src/Checkiner/config/THY@/home/tianen/go/src/Checkiner/config/CUTECLOUD
+Example: checkiner -i 120 -w THY@CUTECLOUD 
+-p /home/tianen/go/src/Checkiner/config/THY@/home/tianen/go/src/Checkiner/config/CUTECLOUD
 
 Options:
 `)

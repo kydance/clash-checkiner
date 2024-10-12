@@ -18,16 +18,17 @@ var (
 		"Sec-Fetch-Dest":     "empty",
 		"Sec-Fetch-Mode":     "cors",
 		"Sec-Fetch-Site":     "same-origin",
-		"User-Agent":         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-		"X-Requested-With":   "XMLHttpRequest",
+		"User-Agent": `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36
+							 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36`,
+		"X-Requested-With": "XMLHttpRequest",
 	}
 
 	// Web site
 	// FIXME Due to the change of web site, please configure it with file.
 
-	THY_URL_ORIGIN  string = "https://fly.ssthy.us/"
-	THY_URL_LOGIN   string = "https://fly.ssthy.us/auth/login"
-	THY_URL_CHECKIN string = "https://fly.ssthy.us/user/checkin"
+	THY_URL_ORIGIN  string = "https://cloud.ssthy.us/"
+	THY_URL_LOGIN   string = "https://cloud.ssthy.us/auth/login"
+	THY_URL_CHECKIN string = "https://cloud.ssthy.us/user/checkin"
 
 	CUTECLOUD_URL_ORIGIN  string = "https://www.cute-cloud.top"
 	CUTECLOUD_URL_LOGIN   string = "https://www.cute-cloud.top/auth/login"
@@ -66,10 +67,10 @@ func ReadConfigFromFile(path string) (string, string, error) {
 func NotifySend(title string, level string, body string) {
 	switch runtime.GOOS {
 	case "linux":
-		exec.Command("notify-send", "-u", level, title, body).Run()
-	case "darwin":
+		_ = exec.Command("notify-send", "-u", level, title, body).Run()
+	case "darwin": // MAC
 		str := "display notification \"" + body + "\" with title \"" + title + "\""
-		exec.Command("osascript", "-e", str).Run()
+		_ = exec.Command("osascript", "-e", str).Run()
 	case "windows":
 		panic("Not implemented on Windows")
 	default:
@@ -77,16 +78,3 @@ func NotifySend(title string, level string, body string) {
 	}
 	log.Println(title, body)
 }
-
-// var gCfg map[string]map[string]string
-
-// func init() {
-// 	cfgPath := "/Users/kyden/gitProj/Checkiner/conf/app.ini"
-// 	cfg, err := config.NewConfig("ini", cfgPath)
-// 	if err != nil {
-// 		panic(fmt.Sprintf("Read %s conf failed.", cfgPath))
-// 	}
-
-// 	sec, _ := cfg.GetSection("CUTECLOUD")
-// 	gCfg["CUTECLOUD"] = sec
-// }
