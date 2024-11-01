@@ -2,12 +2,13 @@
 *.txt
 
 # executables
-checkiner
-
-.vscode
+bin/
 
 conf/*
 !conf/example
 
 # log
 *.log
+
+# config
+*.yaml

@@ -8,75 +8,80 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/kydance/ziwi/pkg/log"
+	"github.com/samber/lo"
+	"github.com/spf13/viper"
 
 	"Checkiner/pkg/util"
 )
 
-type Checkin struct {
+type WebInfo struct {
 	Whoami string
 
-	Login_header_accpet       string
-	Login_header_content_type string
-	Login_header_method       string
-	Login_url                 string
+	OriginURL  string
+	LoginURL   string
+	CheckinURL string
 
-	Checkin_header_method string
-	Checkin_url           string
-
-	// flag
-	Flag_checkined bool
-	LastDay        int
-
-	// private
 	email  string
 	passwd string
 }
 
-func NewCheckiner(whoami, login_header_accpet, login_header_content_type,
-	login_header_method, login_url, checkin_header_method, checkin_url,
-	config_file_path string,
-) *Checkin {
-	email, passwd, err := util.ReadConfigFromFile(config_file_path)
-	if err != nil {
-		// fmt.Println("Read config file error: ", err)
-		log.Fatal("Read config file error: ", err)
-		return nil
-	}
+func NewWebInfo(whoami, originURL, loginURL, checkinURL, email, passwd string) *WebInfo {
+	return &WebInfo{
+		Whoami: whoami,
 
-	return &Checkin{
-		Whoami:                    whoami,
-		Login_header_accpet:       login_header_accpet,
-		Login_header_content_type: login_header_content_type,
-		Login_header_method:       login_header_method,
-		Login_url:                 login_url,
+		OriginURL:  originURL,
+		LoginURL:   loginURL,
+		CheckinURL: checkinURL,
 
-		Checkin_header_method: checkin_header_method,
-		Checkin_url:           checkin_url,
-
-		Flag_checkined: false,
-		LastDay:        -1,
-
-		// TAG  Set email and passwd by reading config file
 		email:  email,
 		passwd: passwd,
 	}
 }
 
-func (c *Checkin) setRequestHeader(req *http.Request) {
+type Checkiner struct {
+	*WebInfo
+
+	LoginHeaderAccpet      string
+	LoginHeaderContentType string
+	HeaderMethod           string
+
+	// flag
+	FlagCheckined bool
+	LastDay       int
+}
+
+func NewCheckiner(loginHeaderAccpet, loginHeaderContentType,
+	loginHeaderMethod string, webInfo *WebInfo,
+) *Checkiner {
+	return &Checkiner{
+		WebInfo: webInfo,
+
+		LoginHeaderAccpet:      loginHeaderAccpet,
+		LoginHeaderContentType: loginHeaderContentType,
+		HeaderMethod:           loginHeaderMethod,
+
+		FlagCheckined: false,
+		LastDay:       -1,
+	}
+}
+
+func (c *Checkiner) setRequestHeader(req *http.Request) {
 	header := map[string]string{
-		"Accept":             c.Login_header_accpet,
-		"Content-Type":       c.Login_header_content_type,
-		"Referer":            c.Login_url,
-		"Sec-Ch-Ua":          util.HEADERS["Sec-Ch-Ua"],
-		"Sec-Ch-Ua-Mobile":   util.HEADERS["Sec-Ch-Ua-Mobile"],
-		"Sec-Ch-Ua-Platform": util.HEADERS["Sec-Ch-Ua-Platform"],
-		"User-Agent":         util.HEADERS["User-Agent"],
-		"X-Requested-With":   util.HEADERS["X-Requested-With"],
+		"Accept":             c.LoginHeaderAccpet,
+		"Content-Type":       c.LoginHeaderContentType,
+		"Referer":            c.LoginURL,
+		"Sec-Ch-Ua":          Headers["Sec-Ch-Ua"],
+		"Sec-Ch-Ua-Mobile":   Headers["Sec-Ch-Ua-Mobile"],
+		"Sec-Ch-Ua-Platform": Headers["Sec-Ch-Ua-Platform"],
+		"User-Agent":         Headers["User-Agent"],
+		"X-Requested-With":   Headers["X-Requested-With"],
 	}
 	// Add header
 	for key, value := range header {
@@ -84,21 +89,22 @@ func (c *Checkin) setRequestHeader(req *http.Request) {
 	}
 }
 
-func (c *Checkin) setRequestBody(req *http.Request) {
+func (c *Checkiner) setRequestBody(req *http.Request) {
 	data := []byte("email=" + c.email + "&passwd=" + c.passwd)
 	req.Body = io.NopCloser(bytes.NewBuffer(data))
 }
 
-func (c *Checkin) handleLoginResponse(resp *http.Response, cookie *string) error {
+func (c *Checkiner) handleLoginResponse(resp *http.Response, cookie *string) error {
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		fmt.Println("Status Code Error: ", resp.StatusCode)
+		log.Errorln("Status Code Error: ", resp.StatusCode)
 		return errors.New("Status Code: " + string(rune(resp.StatusCode)))
 	}
 
 	// Handle response body
 	buffer, err := io.ReadAll(resp.Body)
 	if err != nil {
+		log.Errorf("Read body failed: %v", err)
 		return err
 	}
 
@@ -106,27 +112,24 @@ func (c *Checkin) handleLoginResponse(resp *http.Response, cookie *string) error
 	buf := map[string]any{}
 	err = json.Unmarshal(buffer, &buf)
 	if err != nil {
+		log.Errorf("JSON parse failed: %v", err)
 		return err
 	}
 
 	for k, v := range buf {
 		if k == "ret" {
-			fmt.Println(k, ":", v.(float64))
+			log.Infoln(k, ":", v.(float64))
 		} else if k == "msg" {
-			// fmt.Println(k, ":", v.(string))
-			util.NotifySend("Checkiner", "normal", ">>> "+c.Whoami+" "+v.(string))
+			util.SendNotify("Checkiner", "normal", ">>> "+c.Whoami+" "+v.(string))
 		} else {
-			// fmt.Println("Unknown key: ", k)
-			util.NotifySend("Checkiner", "critical", "Unknown key: "+k)
+			util.SendNotify("Checkiner", "critical", "Unknown key: "+k)
 		}
 	}
 
 	// TAG Get the lastest cookie
 	for k, v := range resp.Header {
-		// fmt.Println(k, ":", v[0])
 		if k == "Set-Cookie" {
 			for _, val := range v {
-				// fmt.Println(val)
 				str := strings.Split(val, ";")
 				*cookie += (str[0] + "; ")
 			}
@@ -136,45 +139,37 @@ func (c *Checkin) handleLoginResponse(resp *http.Response, cookie *string) error
 }
 
 // Display resoponse for JSON
-func (c *Checkin) handleResponse(reader io.Reader) error {
+func (c *Checkiner) handleResponse(reader io.Reader) error {
 	body, err := io.ReadAll(reader)
 	if err != nil {
-		// fmt.Println("Read body failed: ", err)
-		log.Println("Read body failed: ", err)
+		log.Errorf("Read body failed: %v", err)
 		return err
 	}
 
 	var dat map[string]interface{}
 	if err := json.Unmarshal(body, &dat); err != nil {
-		// fmt.Println("JSON parse failed: ", err)
-		log.Println("JSON parse failed: ", err)
+		log.Errorf("JSON parse failed: %v", err)
 		return err
 	}
 
-	/*
-		// Debug: response body
-		for k, v := range dat {
-			fmt.Println(k, ": ", v)
-			log.Println(k, ": ", v)
-		}
-	*/
+	// Debug: response body
+	for k, v := range dat {
+		log.Infoln(k, ": ", v)
+	}
+
 	// TAG Level uses `critical` is to ensure checkin successfully for human.
-	util.NotifySend(
-		"Checkiner",
-		"critical",
-		">>> "+c.Whoami+" checkin success: "+dat["msg"].(string),
-	)
+	util.SendNotify("Checkiner", "critical",
+		">>> "+c.Whoami+" checkin success: "+dat["msg"].(string))
 	return nil
 }
 
-func (c *Checkin) login() (string, error) {
+func (c *Checkiner) login() (string, error) {
 	cookie := ""
 
 	// Create request
-	req, err := http.NewRequest(c.Login_header_method, c.Login_url, nil)
+	req, err := http.NewRequest(c.HeaderMethod, c.LoginURL, nil)
 	if err != nil {
-		// fmt.Println(">>> "+this.Whoami+" Creating request: ", err)
-		log.Println(">>> "+c.Whoami+" Creating request failed: ", err)
+		log.Errorln(">>> "+c.Whoami+" Creating request failed: ", err)
 		return cookie, err
 	}
 	c.setRequestHeader(req)
@@ -183,8 +178,7 @@ func (c *Checkin) login() (string, error) {
 	// Create HTTP client and send requset
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// fmt.Println(">>> "+this.Whoami+" "+this.Login_header_method+" request err: ", err)
-		log.Println(">>> "+c.Whoami+" "+c.Login_header_method+" request err: ", err)
+		log.Errorln(">>> "+c.Whoami+" "+c.HeaderMethod+" request err: ", err)
 		return cookie, err
 	}
 	defer resp.Body.Close()
@@ -197,41 +191,35 @@ func (c *Checkin) login() (string, error) {
 	return cookie, nil
 }
 
-func (c *Checkin) Checkin(
-	header_accpet string,
-	header_content_length string,
-	url_orign string,
-) error {
+func (c *Checkiner) Checkin(headerAccpet, headerContentLength string) error {
 	cookie, err := c.login()
 	if err != nil {
-		// fmt.Println(">>> "+this.Whoami+" Login error: ", err)
-		log.Println(">>> "+c.Whoami+" Login error: ", err)
+		log.Errorln(">>> "+c.Whoami+" Login error: ", err)
 		return err
 	}
 
 	header := map[string]string{
-		"Accept":             header_accpet,
-		"Accept-Encoding":    util.HEADERS["Accept-Encoding"],
-		"Accept-Language":    util.HEADERS["Accept-Language"],
-		"Content-Length":     header_content_length,
+		"Accept":             headerAccpet,
+		"Accept-Encoding":    Headers["Accept-Encoding"],
+		"Accept-Language":    Headers["Accept-Language"],
+		"Content-Length":     headerContentLength,
 		"Cookie":             cookie,
-		"Origin":             url_orign,
-		"Referer":            c.Checkin_url,
-		"Sec-Ch-Ua":          util.HEADERS["Sec-Ch-Ua"],
-		"Sec-Ch-Ua-Mobile":   util.HEADERS["Sec-Ch-Ua-Mobile"],
-		"Sec-Ch-Ua-Platform": util.HEADERS["Sec-Ch-Ua-Platform"],
-		"Sec-Fetch-Dest":     util.HEADERS["Sec-Fetch-Dest"],
-		"Sec-Fetch-Mode":     util.HEADERS["Sec-Fetch-Mode"],
-		"Sec-Fetch-Site":     util.HEADERS["Sec-Fetch-Site"],
-		"User-Agent":         util.HEADERS["User-Agent"],
-		"X-Requested-With":   util.HEADERS["X-Requested-With"],
+		"Origin":             c.OriginURL,
+		"Referer":            c.CheckinURL,
+		"Sec-Ch-Ua":          Headers["Sec-Ch-Ua"],
+		"Sec-Ch-Ua-Mobile":   Headers["Sec-Ch-Ua-Mobile"],
+		"Sec-Ch-Ua-Platform": Headers["Sec-Ch-Ua-Platform"],
+		"Sec-Fetch-Dest":     Headers["Sec-Fetch-Dest"],
+		"Sec-Fetch-Mode":     Headers["Sec-Fetch-Mode"],
+		"Sec-Fetch-Site":     Headers["Sec-Fetch-Site"],
+		"User-Agent":         Headers["User-Agent"],
+		"X-Requested-With":   Headers["X-Requested-With"],
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest(c.Checkin_header_method, c.Checkin_url, nil)
+	req, err := http.NewRequest(c.HeaderMethod, c.CheckinURL, nil)
 	if err != nil {
-		// fmt.Println(">>> "+this.Whoami+" Creating request: ", err)
-		log.Println(">>> "+c.Whoami+" Creating request failed: ", err)
+		log.Errorln(">>> "+c.Whoami+" Creating request failed: ", err)
 		return err
 	}
 
@@ -243,25 +231,21 @@ func (c *Checkin) Checkin(
 	// Create HTTP client and send requset
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// fmt.Println(">>> "+this.Whoami+" POST request err: ", err)
-		log.Println(">>> "+c.Whoami+" POST request err: ", err)
+		log.Errorln(">>> "+c.Whoami+" POST request err: ", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	// Check status code
 	if resp.StatusCode != http.StatusOK {
-		// fmt.Println(">>> "+this.Whoami+" Status Code Error: ", resp.StatusCode)
-		log.Println(">>> "+c.Whoami+" Status Code Error: ", resp.StatusCode)
+		log.Errorln(">>> "+c.Whoami+" Status Code Error: ", resp.StatusCode)
 		return err
 	}
 
-	/*
-		// Debug: response header
-		for k, v := range resp.Header {
-			println(k, ":", v[0])
-		}
-	*/
+	// Debug: response header
+	for k, v := range resp.Header {
+		log.Infoln(k, ":", v[0])
+	}
 
 	// br 压缩
 	// Cookie Expired
@@ -273,42 +257,143 @@ func (c *Checkin) Checkin(
 		reader := brotli.NewReader(resp.Body)
 		err := c.handleResponse(reader)
 		if err != nil {
-			// fmt.Println(">>> "+this.Whoami+" Handle response failed: ", err)
-			log.Println(">>> "+c.Whoami+" Handle response failed: ", err)
+			log.Errorln(">>> "+c.Whoami+" Handle response failed: ", err)
 			return err
 		}
 	} else if resp.Header.Get("Content-Encoding") == "gzip" {
-		// fmt.Println("gzip")
-		log.Println("gzip")
+		log.Infoln("gzip")
 		reader, err := gzip.NewReader(resp.Body)
 		if err != nil {
-			// fmt.Println(">>> "+this.Whoami+" Create gzip reader error: ", err)
-			log.Println(">>> "+c.Whoami+" Create gzip reader error: ", err)
+			log.Errorln(">>> "+c.Whoami+" Create gzip reader error: ", err)
 			return err
 		}
 		err = c.handleResponse(reader)
 		if err != nil {
-			// fmt.Println(">>> "+this.Whoami+" Handle response failed: ", err)
-			log.Println(">>> "+c.Whoami+" Handle response failed: ", err)
+			log.Errorln(">>> "+c.Whoami+" Handle response failed: ", err)
 			return err
 		}
 	} else if resp.Header.Get("Content-Encoding") == "deflate" {
 		reader := flate.NewReader(resp.Body)
 		err := c.handleResponse(reader)
 		if err != nil {
-			// fmt.Println(">>> "+this.Whoami+" Handle response failed: ", err)
-			log.Println(">>> "+c.Whoami+" Handle response failed: ", err)
+			log.Errorln(">>> "+c.Whoami+" Handle response failed: ", err)
 			return err
 		}
 	} else {
-		// fmt.Println("Not supported Content-Encoding")
-		log.Println("Not supported Content-Encoding")
+		log.Infoln("Not supported Content-Encoding")
 		err := c.handleResponse(resp.Body)
 		if err != nil {
-			// fmt.Println(">>> "+this.Whoami+" Handle response failed: ", err)
-			log.Println(">>> "+c.Whoami+" Handle response failed: ", err)
+			log.Errorln(">>> "+c.Whoami+" Handle response failed: ", err)
 			return err
 		}
 	}
 	return nil
+}
+
+func CheckinRun() (string, error) {
+	// Create channel
+	ch := make(chan struct{})
+
+	// Timer
+	go func(ch chan<- struct{}) {
+		// Create timer
+		timer := time.NewTicker(viper.GetDuration("common.interval"))
+		defer func() {
+			timer.Stop()
+			close(ch)
+		}()
+		for {
+			if _, ok := <-timer.C; !ok {
+				log.Error("Timer error")
+				return
+			}
+			ch <- struct{}{}
+		}
+	}(ch)
+
+	// Checkin
+	checkers := checker()
+	for {
+		if _, ok := <-ch; ok {
+			log.Info("It's time to checkin")
+
+			wg := sync.WaitGroup{}
+			wg.Add(len(checkers))
+
+			currDay := time.Time.Day(time.Now())
+
+			for _, checker := range checkers {
+				log.Infof("curr day: %v %v", currDay, checker)
+				go func(checker *Checkiner) {
+					defer wg.Done()
+
+					if checker.LastDay != currDay {
+						if checker.FlagCheckined {
+							return
+						}
+
+						log.Infof("%s last_day: %d, curr_day: %d\n",
+							checker.Whoami, checker.LastDay, currDay)
+
+						if err := checker.Checkin(
+							CheckinHeaderAccept, HeaderContentLength); err != nil {
+							util.SendNotify("Checkiner", "critical",
+								checker.Whoami+" Check in Failed: "+err.Error())
+							return
+						}
+						checker.FlagCheckined = true
+						checker.LastDay = currDay
+					} else {
+						log.Infof("Checkined tody: %v", currDay)
+						checker.FlagCheckined = false
+					}
+				}(checker)
+			}
+
+			wg.Wait()
+		}
+	}
+}
+
+func webNames() []string {
+	keys := viper.GetViper().AllKeys()
+	names := make([]string, 0, len(keys)-2)
+
+	for _, key := range keys {
+		val := strings.Split(key, ".")[0]
+		if val == "log" || val == "common" {
+			continue
+		}
+
+		names = append(names, val)
+	}
+
+	return lo.Uniq(names)
+}
+
+func checker() []*Checkiner {
+	checkers := make([]*Checkiner, 0)
+
+	webNames := webNames()
+	for _, webName := range webNames {
+		infos := viper.GetStringMapString(webName)
+		accountCnt := (len(infos) - 3) / 2
+		for i := 0; i < accountCnt; i++ {
+			checkers = append(checkers, NewCheckiner(
+				LoginHeaderAccept,
+				LoginHeaderContentType,
+				HeaderMethod,
+				NewWebInfo(
+					webName,
+					infos["origin"],
+					infos["login"],
+					infos["checkin"],
+					infos[fmt.Sprintf("email_%d", i)],
+					infos[fmt.Sprintf("passwd_%d", i)],
+				),
+			))
+		}
+	}
+
+	return checkers
 }
